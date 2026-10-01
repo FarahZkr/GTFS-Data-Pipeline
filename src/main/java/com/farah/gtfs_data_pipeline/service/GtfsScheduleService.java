@@ -16,10 +16,8 @@ import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.Reader;
 import java.net.URL;
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
 
@@ -29,11 +27,12 @@ public class GtfsScheduleService {
     public enum LoadStatus { IDLE, LOADING, READY, FAILED }
 
     private LoadStatus status = LoadStatus.IDLE;
+    private GtfsLoadReport lastReport;
 
-    private final Map<String, Stop> stopLookupMap = new HashMap<>();
-    private final Map<String, Route> routeLookupMap = new HashMap<>();
-    private final Map<String, Trip> tripLookupMap = new HashMap<>();
-    private final Map<String, List<Shape>> shapeLookupMap = new HashMap<>();
+    private final Map<String, Stop> stopLookupMap = new ConcurrentHashMap<>();
+    private final Map<String, Route> routeLookupMap = new ConcurrentHashMap<>();
+    private final Map<String, Trip> tripLookupMap = new ConcurrentHashMap<>();
+    private final Map<String, List<Shape>> shapeLookupMap = new ConcurrentHashMap<>();
     private final List<String> foundFiles = new ArrayList<>();
     private final List<String> missingFiles = new ArrayList<>();
     private final List<String> warnings = new ArrayList<>();
@@ -55,6 +54,7 @@ public class GtfsScheduleService {
             if (is == null) {
                 this.status = LoadStatus.FAILED;
                 warnings.add("Input stream came out as null. Zip file not found.");
+                saveReport();
                 return;
             }
 
@@ -77,25 +77,18 @@ public class GtfsScheduleService {
                 this.status = LoadStatus.FAILED;
                 warnings.add("Error while parsing through zip file.");
             }
-            if (!foundFiles.contains("agency.txt")) {
-                missingFiles.add("agency.txt");
-            }
-            if (!foundFiles.contains("stops.txt")) {
-                missingFiles.add("stops.txt");
-            }
-            if (!foundFiles.contains("routes.txt")) {
-                missingFiles.add("routes.txt");
-            }
-            if (!foundFiles.contains("trips.txt")) {
-                missingFiles.add("trips.txt");
-            }
-            if (!foundFiles.contains("shapes.txt")) {
-                missingFiles.add("shapes.txt");
+            // Retrieving information on all missing files
+            List<String> requiredFiles = List.of("agency.txt", "stops.txt", "routes.txt", "trips.txt", "shapes.txt");
+            for (String file : requiredFiles) {
+                if (!foundFiles.contains(file)) {
+                    missingFiles.add(file);
+                }
             }
         } catch (Exception e) {
             this.status = LoadStatus.FAILED;
             warnings.add("Error during initialization of input stream.");
         }
+        saveReport();
     }
 
     // Parse stops CSV
@@ -202,14 +195,44 @@ public class GtfsScheduleService {
         }
     }
 
-    public GtfsLoadReport loadReport (){
-        return new GtfsLoadReport(this.status.toString(),
+    // Return the list of stops
+    public Collection<Stop> getStops() {
+        return Collections.unmodifiableMap(stopLookupMap).values();
+    }
+
+    // Return the list of routes
+    public Map<String, Route> getRoutes() {
+        return Collections.unmodifiableMap(routeLookupMap);
+    }
+
+    // Return the list of trips
+    public Collection<Trip> getTrips() {
+        return Collections.unmodifiableMap(tripLookupMap).values();
+    }
+
+    // Return the list of shapes
+    public  Map<String, List<Shape>> getShapes() {
+        return Collections.unmodifiableMap(shapeLookupMap);
+    }
+
+    private void saveReport() {
+        this.lastReport = new GtfsLoadReport(
+                this.status.toString(),
                 stopLookupMap.size(),
                 routeLookupMap.size(),
                 tripLookupMap.size(),
                 shapeLookupMap.size(),
-                foundFiles,
-                missingFiles,
-                warnings);
+                new ArrayList<>(foundFiles),
+                new ArrayList<>(missingFiles),
+                new ArrayList<>(warnings)
+        );
+    }
+
+    public LoadStatus getStatus() {
+        return status;
+    }
+
+    public GtfsLoadReport getLastReport() {
+        return lastReport;
     }
 }

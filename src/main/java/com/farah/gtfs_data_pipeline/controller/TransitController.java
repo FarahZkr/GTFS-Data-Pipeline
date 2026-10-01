@@ -1,12 +1,10 @@
 package com.farah.gtfs_data_pipeline.controller;
 
-import com.farah.gtfs_data_pipeline.model.Stop;
 import com.farah.gtfs_data_pipeline.report.GtfsLoadReport;
 import com.farah.gtfs_data_pipeline.service.GtfsScheduleService;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
-import java.util.Collection;
-import java.util.List;
 import java.util.Map;
 
 @RestController
@@ -20,12 +18,19 @@ public class TransitController {
     }
 
     @GetMapping("/load")
-    public void loadGtfsData() {
+    public ResponseEntity<Map<String, String>> loadGtfsData() {
         scheduleService.loadGtfsData();
+        return ResponseEntity.accepted().body(Map.of(
+                "message", "GTFS background ingestion started.",
+                "statusCheckUrl", "/api/status"
+        ));
     }
 
     @GetMapping("/status")
-    public GtfsLoadReport getStatus() {
-        return scheduleService.loadReport();
+    public ResponseEntity<Map<String, Object>> getStatus() {
+        return ResponseEntity.ok(Map.of(
+                "status", scheduleService.getStatus(),
+                "report", scheduleService.getLastReport() != null ? scheduleService.getLastReport() : "No report generated yet."
+        ));
     }
 }
