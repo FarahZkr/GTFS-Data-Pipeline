@@ -1,16 +1,8 @@
-# Compiled class file
-*.class
-
-# Log file
-*.log
-
-# BlueJ files
-*.ctxt
-
-# Mobile Tools for Java (J2ME)
-.mtj.tmp/
-
-# Package Files #
+# ==========================================
+# Java & Build Tools
+# ==========================================
+# Maven
+target/
 *.jar
 *.war
 *.nar
@@ -19,6 +11,55 @@
 *.tar.gz
 *.rar
 
-# virtual machine crash logs, see http://www.java.com/en/download/help/error_hotspot.xml
-hs_err_pid*
-replay_pid*
+# Gradle (if using Gradle alongside/instead of Maven)
+.gradle/
+build/
+
+# ==========================================
+# GTFS Data Archives & Local Downloads
+# ==========================================
+# Ignore large static zip files if placed locally outside resources
+*.gtfs
+*.zip
+!src/main/resources/gtfs.zip   # Un-comment if you WANT to commit a small sample feed
+
+# Temporary GTFS extract directories
+/tmp/
+/data/
+
+# ==========================================
+# IDE & Editor Files
+# ==========================================
+# IntelliJ IDEA
+.idea/
+*.iws
+*.iml
+*.ipr
+out/
+
+# Eclipse
+.apt_generated
+.classpath
+.factorypath
+.project
+.settings/
+bin/
+
+# VS Code
+.vscode/
+
+# NetBeans
+/nbproject/private/
+/build/
+/dist/
+
+# ==========================================
+# Logs & Runtime Files
+# ==========================================
+*.log
+logs/
+*.sys.log
+
+# Operating System Files
+.DS_Store
+Thumbs.db
