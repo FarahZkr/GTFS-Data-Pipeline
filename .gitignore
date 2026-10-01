@@ -63,3 +63,8 @@ logs/
 # Operating System Files
 .DS_Store
 Thumbs.db
+
+# Ignore secrets and local configuration
+.env
+*.env
+application-local.properties
