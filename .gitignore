@@ -67,4 +67,4 @@ Thumbs.db
 # Ignore secrets and local configuration
 .env
 *.env
-application-local.properties
+/src/main/resources/application.properties

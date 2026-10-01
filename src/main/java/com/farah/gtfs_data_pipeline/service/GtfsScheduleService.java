@@ -1,5 +1,8 @@
 package com.farah.gtfs_data_pipeline.service;
 
+import com.farah.gtfs_data_pipeline.geoJson.GeoJsonFeature;
+import com.farah.gtfs_data_pipeline.geoJson.GeoJsonFeatureCollection;
+import com.farah.gtfs_data_pipeline.geoJson.GeoJsonGeometry;
 import com.farah.gtfs_data_pipeline.model.Route;
 import com.farah.gtfs_data_pipeline.model.Shape;
 import com.farah.gtfs_data_pipeline.model.Stop;
@@ -11,11 +14,9 @@ import org.apache.commons.csv.CSVRecord;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 
-import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.Reader;
-import java.net.URL;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.zip.ZipEntry;
@@ -133,7 +134,7 @@ public class GtfsScheduleService {
                 String id = record.get("route_id");
                 String sName = record.get("route_short_name");
                 String lName = record.get("route_long_name");
-                String color = record.isMapped("route_color") ? record.get("route_color") : "000000";
+                String color = record.isMapped("route_color") ? "#" + record.get("route_color") : "#000000";
 
                 Route route = new Route(id, sName, lName, color);
                 routeLookupMap.put(id, route);
@@ -195,6 +196,69 @@ public class GtfsScheduleService {
         }
     }
 
+    public GeoJsonFeatureCollection getStopsAsGeoJSON(){
+        Collection<Stop> stops = getStops();
+        List<GeoJsonFeature> features = new ArrayList<>();
+        for(Stop stop : stops) {
+            features.add(new GeoJsonFeature(
+                    new GeoJsonGeometry("Point", List.of(stop.longitude(), stop.latitude()))
+                    , Map.of(
+                    "stop_id", stop.stopId(),
+                    "stop_name", stop.stopName()
+            )
+            ));
+        }
+        return new GeoJsonFeatureCollection(features);
+    }
+
+    public GeoJsonFeatureCollection getRoutesAsGeoJSON(){
+        Map<String, Route> routes = getRoutes();
+        Map<String, List<Shape>> shapes = getShapes();
+        Collection<Trip> trips = getTrips().values();
+        List<GeoJsonFeature> features = new ArrayList<>();
+
+        shapes.forEach((shapeId, shapePoints) -> {
+            List<List<Double>> coordinates = shapePoints.stream()
+                    .sorted(Comparator.comparingInt(Shape::sequence))
+                    .map(pt -> List.of(pt.longitude(), pt.latitude()))
+                    .toList();
+
+            // Find a matching trip
+            Optional<Trip> matchingTrip = trips.stream()
+                    .filter(trip -> shapeId.equals(trip.shapeId()))
+                    .findFirst();
+
+            // Default values
+            String routeId = "Unknown";
+            String routeName = "Unknown Route";
+            String routeColor = "000000";
+
+            // If trip found
+            if (matchingTrip.isPresent()) {
+                Route route = routes.get(matchingTrip.get().routeId());
+                // If route found
+                if (route != null) {
+                    routeId = route.routeId();
+                    routeName = route.routeLongName();
+                    routeColor = route.routeColor() != null ? route.routeColor() : "#000000";
+                }
+            }
+
+            // Construct lineString feature
+            GeoJsonGeometry geometry = new GeoJsonGeometry("LineString", coordinates);
+            Map<String, Object> properties = Map.of(
+                    "shape_id", shapeId,
+                    "route_id", routeId,
+                    "route_name", routeName,
+                    "route_color", routeColor
+            );
+
+            features.add(new GeoJsonFeature(geometry, properties));
+        });
+
+        return new GeoJsonFeatureCollection(features);
+    }
+
     // Return the list of stops
     public Collection<Stop> getStops() {
         return Collections.unmodifiableMap(stopLookupMap).values();
@@ -206,8 +270,8 @@ public class GtfsScheduleService {
     }
 
     // Return the list of trips
-    public Collection<Trip> getTrips() {
-        return Collections.unmodifiableMap(tripLookupMap).values();
+    public Map<String, Trip> getTrips() {
+        return Collections.unmodifiableMap(tripLookupMap);
     }
 
     // Return the list of shapes
