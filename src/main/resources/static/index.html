@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>STM Live Transit Visualizer</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <style>
+        body, html { margin: 0; padding: 0; height: 100%; width: 100%; }
+        #map { height: 100vh; width: 100vw; }
+        #loading-overlay {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            z-index: 1000;
+            background: rgba(255, 255, 255, 0.9);
+            padding: 12px 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.2);
+            font-family: sans-serif;
+            font-weight: bold;
+            color: #333;
+        }
+    </style>
+</head>
+<body>
+
+<div id="loading-overlay">Initializing GTFS Schedule Data...</div>
+<div id="map"></div>
+
+<script>
+    // Initialize Map using STM data
+    const map = L.map('map').setView([45.5017, -73.5673], 12);
+
+    // Add OpenStreetMap Tile Layer
+    L.tileLayer('/api/tiles/{z}/{x}/{y}', {
+        maxZoom: 19,
+        attribution: '© Mapbox © OpenStreetMap'
+    }).addTo(map);
+
+    const vehicleLayer = L.layerGroup().addTo(map);
+
+    // Poll /api/status until data ingestion is READY
+    function pollForCompletion() {
+        return new Promise((resolve, reject) => {
+            const interval = setInterval(async () => {
+                try {
+                    const response = await fetch('/api/status');
+                    const data = await response.json();
+
+                    document.getElementById('loading-overlay').innerText = `GTFS Status: ${data.status}...`;
+
+                    if (data.status === 'READY') {
+                        clearInterval(interval);
+                        document.getElementById('loading-overlay').style.display = 'none';
+                        resolve(true);
+                    } else if (data.status === 'FAILED') {
+                        clearInterval(interval);
+                        document.getElementById('loading-overlay').innerText = 'Failed to load GTFS schedule data.';
+                        document.getElementById('loading-overlay').style.color = 'red';
+                        reject(new Error('GTFS Load Failed'));
+                    }
+                } catch (err) {
+                    console.error("Error checking GTFS status:", err);
+                }
+            }, 1000); // Check status every second
+        });
+    }
+
+    // Fetch static route shapes only after data loaded
+    function fetchStaticRoutes() {
+        fetch('/api/map/routes')
+            .then(res => res.json())
+            .then(geoJsonData => {
+                L.geoJSON(geoJsonData, {
+                    style: (feature) => {
+                        let rawColor = feature.properties.route_color || '#3388ff';
+                        let hexColor = rawColor.startsWith('#') ? rawColor : `#${rawColor}`;
+                        return {
+                            color: hexColor,
+                            weight: 1.5,
+                            opacity: 0.25
+                        };
+                    },
+                    onEachFeature: (feature, layer) => {
+                        // Hover events to highlight the line
+                        layer.on({
+                            mouseover: (e) => {
+                                e.target.setStyle({ weight: 5, opacity: 0.9 });
+                                e.target.bringToFront();
+                            },
+                            mouseout: (e) => {
+                                e.target.setStyle({ weight: 1.5, opacity: 0.25 });
+                            }
+                        });
+                        layer.bindTooltip(`<b>Route:</b> ${feature.properties.route_name}`);
+                    }
+                }).addTo(map);
+            })
+            .catch(err => console.error("Error fetching routes:", err));
+    }
+
+    // Poll Real-Time Vehicle Positions every 5 seconds
+    function updateLiveVehicles() {
+        fetch('/api/map/vehicles')
+            .then(res => res.json())
+            .then(geoJsonData => {
+                // Clear previous markers to prevent stacking
+                vehicleLayer.clearLayers();
+
+                L.geoJSON(geoJsonData, {
+                    pointToLayer: (feature, latlng) => {
+                        let rawColor = feature.properties.route_color || '#000000';
+                        let hexColor = rawColor.startsWith('#') ? rawColor : `#${rawColor}`;
+                        return L.circleMarker(latlng, {
+                            radius: 5,
+                            fillColor: hexColor,
+                            color: '#ffffff',
+                            weight: 1,
+                            fillOpacity: 0.95
+                        });
+                    },
+                    onEachFeature: (feature, layer) => {
+                        const speedKmH = feature.properties.speed ? (feature.properties.speed * 3.6).toFixed(1) : 0;
+                        layer.bindPopup(`
+                            <div style="font-family: sans-serif;">
+                              <h4 style="margin:0 0 5px 0;">Bus ${feature.properties.vehicle_id}</h4>
+                              <b>Route:</b> ${feature.properties.route_short_name || 'N/A'}<br>
+                              <b>Trip ID:</b> ${feature.properties.trip_id || 'N/A'}<br>
+                              <b>Speed:</b> ${speedKmH} km/h<br>
+                              <b>Bearing:</b> ${feature.properties.bearing}°
+                            </div>
+                        `);
+                    }
+                }).addTo(vehicleLayer);
+            })
+            .catch(err => console.error("Error fetching live vehicles:", err));
+    }
+
+    // Main Initialization Orchestration Workflow
+    async function initializeApp() {
+        try {
+            // Trigger background ingestion task
+            await fetch('/api/load', { method: 'GET' });
+
+            // Wait until loading finishes
+            await pollForCompletion();
+
+            // Load static map routes once data is READY
+            fetchStaticRoutes();
+
+            // Start polling live vehicles
+            updateLiveVehicles();
+            setInterval(updateLiveVehicles, 5000);
+        } catch (error) {
+            console.error("Initialization failed:", error);
+        }
+    }
+
+    // Start application on page load
+    initializeApp();
+</script>
+</body>
+</html>
