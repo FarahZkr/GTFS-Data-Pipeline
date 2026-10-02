@@ -18,8 +18,8 @@ public class TransitController {
     }
 
     @GetMapping("/load")
-    public ResponseEntity<Map<String, String>> loadGtfsData() {
-        scheduleService.loadGtfsData();
+    public ResponseEntity<Map<String, String>> loadGtfsData() throws Exception {
+        scheduleService.loadStopsFromConfiguredUrl();
         return ResponseEntity.accepted().body(Map.of(
                 "message", "GTFS background ingestion started.",
                 "statusCheckUrl", "/api/status"

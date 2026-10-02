@@ -11,12 +11,15 @@ import com.farah.gtfs_data_pipeline.report.GtfsLoadReport;
 import org.apache.commons.csv.CSVFormat;
 import org.apache.commons.csv.CSVParser;
 import org.apache.commons.csv.CSVRecord;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.Reader;
+import java.net.URI;
+import java.net.URL;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.zip.ZipEntry;
@@ -24,6 +27,9 @@ import java.util.zip.ZipInputStream;
 
 @Service
 public class GtfsScheduleService {
+
+    @Value("${gtfs.schedule.url}")
+    private String scheduleUrl;
 
     public enum LoadStatus { IDLE, LOADING, READY, FAILED }
 
@@ -38,8 +44,14 @@ public class GtfsScheduleService {
     private final List<String> missingFiles = new ArrayList<>();
     private final List<String> warnings = new ArrayList<>();
 
+    public void loadStopsFromConfiguredUrl() throws Exception {
+        loadGtfsData(this.scheduleUrl);
+    }
+
     @Async
-    public void loadGtfsData() {
+    public void loadGtfsData(String zipUrl) throws Exception {
+        URL url = new URI(zipUrl).toURL();
+
         this.status = LoadStatus.LOADING;
 
         // Clear previous state
@@ -51,33 +63,21 @@ public class GtfsScheduleService {
         missingFiles.clear();
         warnings.clear();
 
-        try (InputStream is = getClass().getClassLoader().getResourceAsStream("gtfs.zip")){
-            if (is == null) {
-                this.status = LoadStatus.FAILED;
-                warnings.add("Input stream came out as null. Zip file not found.");
-                saveReport();
-                return;
-            }
+        try (ZipInputStream zipIn = new ZipInputStream(url.openStream())) {
+            ZipEntry entry;
+            while((entry = zipIn.getNextEntry()) != null){
+                String fileName = entry.getName();
+                foundFiles.add(fileName);
 
-            try (ZipInputStream zInStream = new ZipInputStream(is)) {
-                ZipEntry entry;
-                while((entry = zInStream.getNextEntry()) != null){
-                    String fileName = entry.getName();
-                    foundFiles.add(fileName);
-
-                    switch (fileName) {
-                        case "stops.txt" -> parseStopsData(zInStream);
-                        case "routes.txt" -> parseRoutesData(zInStream);
-                        case "trips.txt" -> parseTripsData(zInStream);
-                        case "shapes.txt" -> parseShapesData(zInStream);
-                    }
-                    zInStream.closeEntry();
+                switch (fileName) {
+                    case "stops.txt" -> parseStopsData(zipIn);
+                    case "routes.txt" -> parseRoutesData(zipIn);
+                    case "trips.txt" -> parseTripsData(zipIn);
+                    case "shapes.txt" -> parseShapesData(zipIn);
                 }
-                this.status = LoadStatus.READY;
-            } catch (Exception e) {
-                this.status = LoadStatus.FAILED;
-                warnings.add("Error while parsing through zip file.");
+                zipIn.closeEntry();
             }
+            this.status = LoadStatus.READY;
             // Retrieving information on all missing files
             List<String> requiredFiles = List.of("agency.txt", "stops.txt", "routes.txt", "trips.txt", "shapes.txt");
             for (String file : requiredFiles) {
@@ -87,7 +87,7 @@ public class GtfsScheduleService {
             }
         } catch (Exception e) {
             this.status = LoadStatus.FAILED;
-            warnings.add("Error during initialization of input stream.");
+        warnings.add("Error while parsing through zip file.");
         }
         saveReport();
     }
