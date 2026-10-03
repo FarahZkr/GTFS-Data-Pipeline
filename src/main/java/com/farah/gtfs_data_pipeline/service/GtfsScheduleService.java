@@ -325,6 +325,8 @@ public class GtfsScheduleService {
         return lastReport;
     }
 
+    // USING DAVID MOTEN'S R-TREE LIBRARY TO SEARCH EFFICIENTLY FOR STOPS
+
     // Load up stops in R-Tree to make search faster
     public void buildRtree() {
         spatialIndex = RTree.create(); // Reset index
@@ -353,6 +355,7 @@ public class GtfsScheduleService {
                 .single();
     }
 
+    // Calculating the distance between point A to point B
     private double calculateHaversineMeters(double lat1, double lon1, double lat2, double lon2) {
         final int R = 6_371_000; // Earth radius in meters
         double dLat = Math.toRadians(lat2 - lat1);
