@@ -8,6 +8,10 @@ import com.farah.gtfs_data_pipeline.model.Shape;
 import com.farah.gtfs_data_pipeline.model.Stop;
 import com.farah.gtfs_data_pipeline.model.Trip;
 import com.farah.gtfs_data_pipeline.report.GtfsLoadReport;
+import com.github.davidmoten.rtree.Entry;
+import com.github.davidmoten.rtree.RTree;
+import com.github.davidmoten.rtree.geometry.Geometries;
+import com.github.davidmoten.rtree.geometry.Point;
 import org.apache.commons.csv.CSVFormat;
 import org.apache.commons.csv.CSVParser;
 import org.apache.commons.csv.CSVRecord;
@@ -15,7 +19,6 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 
-import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.Reader;
 import java.net.URI;
@@ -36,6 +39,7 @@ public class GtfsScheduleService {
     private static final double MAX_LAT = 46.0;
     private static final double MIN_LON = -74.0;
     private static final double MAX_LON = -73.0;
+    private RTree<Stop, Point> spatialIndex = RTree.create();
 
     public enum LoadStatus { IDLE, LOADING, READY, FAILED }
 
@@ -97,6 +101,7 @@ public class GtfsScheduleService {
             this.status = LoadStatus.FAILED;
         warnings.add("Error while parsing through zip file.");
         }
+        buildRtree();
         saveReport();
     }
 
@@ -318,5 +323,43 @@ public class GtfsScheduleService {
 
     public GtfsLoadReport getLastReport() {
         return lastReport;
+    }
+
+    // Load up stops in R-Tree to make search faster
+    public void buildRtree() {
+        spatialIndex = RTree.create(); // Reset index
+        for (Stop stop : stopLookupMap.values()) {
+            // R-Tree indexes by Point(longitude, latitude)
+            spatialIndex = spatialIndex.add(stop, Geometries.point(stop.longitude(), stop.latitude()));
+        }
+    }
+
+    // O(log N) Spatial Radius Search
+    public List<Stop> findNearbyStops(double userLat, double userLon, double radiusMeters) {
+        // Convert radial meters to approximate bounding degree offset
+        double latOffset = radiusMeters / 111_000.0;
+        double lonOffset = radiusMeters / (111_000.0 * Math.cos(Math.toRadians(userLat)));
+
+        // Fast R-Tree Bounding Box Search O(log N)
+        return spatialIndex.search(Geometries.rectangle(
+                        userLon - lonOffset, userLat - latOffset,
+                        userLon + lonOffset, userLat + latOffset
+                ))
+                .map(Entry::value)
+                // 2. Precise Haversine distance refinement on candidate subset
+                .filter(stop -> calculateHaversineMeters(userLat, userLon, stop.latitude(), stop.longitude()) <= radiusMeters)
+                .toList()
+                .toBlocking()
+                .single();
+    }
+
+    private double calculateHaversineMeters(double lat1, double lon1, double lat2, double lon2) {
+        final int R = 6_371_000; // Earth radius in meters
+        double dLat = Math.toRadians(lat2 - lat1);
+        double dLon = Math.toRadians(lon2 - lon1);
+        double a = Math.sin(dLat / 2) * Math.sin(dLat / 2)
+                + Math.cos(Math.toRadians(lat1)) * Math.cos(Math.toRadians(lat2))
+                * Math.sin(dLon / 2) * Math.sin(dLon / 2);
+        return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
     }
 }

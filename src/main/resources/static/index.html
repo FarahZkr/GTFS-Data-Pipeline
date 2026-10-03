@@ -21,6 +21,36 @@
             font-weight: bold;
             color: #333;
         }
+
+        .spatial-info-panel {
+            background: white;
+            padding: 12px 16px;
+            border-radius: 8px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+            max-width: 300px;
+            max-height: 250px;
+            overflow-y: auto;
+            font-family: Arial, sans-serif;
+            font-size: 13px;
+            display: none;
+        }
+        .spatial-info-panel h4 {
+            margin: 0 0 8px 0;
+            color: #333;
+            font-size: 14px;
+            border-bottom: 1px solid #eee;
+            padding-bottom: 4px;
+        }
+
+        .spatial-info-panel ul {
+            margin: 0;
+            padding-left: 18px;
+        }
+
+        .spatial-info-panel li {
+            margin-bottom: 4px;
+            color: #555;
+        }
     </style>
 </head>
 <body>
@@ -39,6 +69,56 @@
     }).addTo(map);
 
     const vehicleLayer = L.layerGroup().addTo(map);
+
+    let searchCircle = null;
+
+    map.on('click', function (e) {
+        const lat = e.latlng.lat;
+        const lon = e.latlng.lng;
+        const radiusMeters = 500;
+
+        // Clear previous search circle
+        if (searchCircle) map.removeLayer(searchCircle);
+
+        // Draw new radius circle
+        searchCircle = L.circle([lat, lon], {
+            radius: radiusMeters,
+            color: '#28a745',
+            fillColor: '#28a745',
+            fillOpacity: 0.15
+        }).addTo(map);
+
+        // Fetch from Java Spring Boot R-Tree
+        fetch(`/api/stops/nearby?lat=${lat}&lon=${lon}&radiusMeters=${radiusMeters}`)
+            .then(res => res.json())
+            .then(stops => {
+                let content = `<div style="max-height:150px; overflow-y:auto;">
+                             <b>Stops within ${radiusMeters}m:</b><br/>`;
+
+                const uniqueStopNames = [...new Set(stops.map(s => s.stopName))];
+                if (uniqueStopNames.length === 0) {
+                    content += `<i>No stops found.</i>`;
+                } else {
+                    content += `<ol style="margin:5px 0 0 15px; padding:0; list-style-type: disc;">`;
+                    uniqueStopNames.forEach(s => content += `<li>${s}</li>`);
+                    content += `</ol>`;
+                }
+                content += `</div>`;
+
+                // Open Leaflet popup directly at click point
+                L.popup()
+                    .setLatLng(e.latlng)
+                    .setContent(content)
+                    .openOn(map); // Automatically closes any previously opened popup!
+            });
+    });
+
+    map.on('popupclose', function () {
+        if (searchCircle) {
+            map.removeLayer(searchCircle);
+            searchCircle = null;
+        }
+    });
 
     // Poll /api/status until data ingestion is READY
     function pollForCompletion() {
