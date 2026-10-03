@@ -4,10 +4,12 @@ import java.util.List;
 
 public record GtfsLoadReport(
     String status,
-    int totalStopsLoaded,
-    int totalRoutesLoaded,
-    int totalTripsLoaded,
-    int totalShapesLoaded,
+    int totalStops,
+    int totalRoutes,
+    int totalTrips,
+    int totalShapes,
+    int orphanTripsCount,
+    int outOfBoundsStopsCount,
     List<String> foundFiles,
     List<String> missingFiles,
     List<String> warnings

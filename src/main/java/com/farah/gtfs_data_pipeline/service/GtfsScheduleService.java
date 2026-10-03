@@ -31,6 +31,12 @@ public class GtfsScheduleService {
     @Value("${gtfs.schedule.url}")
     private String scheduleUrl;
 
+    // Bounding area for STM
+    private static final double MIN_LAT = 45.0;
+    private static final double MAX_LAT = 46.0;
+    private static final double MIN_LON = -74.0;
+    private static final double MAX_LON = -73.0;
+
     public enum LoadStatus { IDLE, LOADING, READY, FAILED }
 
     private LoadStatus status = LoadStatus.IDLE;
@@ -43,6 +49,8 @@ public class GtfsScheduleService {
     private final List<String> foundFiles = new ArrayList<>();
     private final List<String> missingFiles = new ArrayList<>();
     private final List<String> warnings = new ArrayList<>();
+    private int outOfBoundsStopsCount = 0;
+    private int orphanTripsCount = 0;
 
     public void loadStopsFromConfiguredUrl() throws Exception {
         loadGtfsData(this.scheduleUrl);
@@ -110,6 +118,11 @@ public class GtfsScheduleService {
                 double lat = Double.parseDouble(record.get("stop_lat"));
                 double lon = Double.parseDouble(record.get("stop_lon"));
 
+                if (lat < MIN_LAT || lat > MAX_LAT || lon < MIN_LON || lon > MAX_LON) {
+                    outOfBoundsStopsCount++;
+                    warnings.add(String.format("Stop ID %s ('%s') has out-of-bounds coordinates: [%f, %f]", id, name, lat, lon));
+                }
+
                 Stop stop = new Stop(id, name, lat, lon);
                 stopLookupMap.put(id, stop);
             }
@@ -160,6 +173,11 @@ public class GtfsScheduleService {
                 String tripId = record.get("trip_id");
                 String routeId = record.get("route_id");
                 String shapeId = record.get("shape_id");
+
+                if (!routeLookupMap.containsKey(routeId)) {
+                    orphanTripsCount++;
+                    warnings.add(String.format("Orphan Trip ID %s references non-existent Route ID %s", tripId, routeId));
+                }
 
                 Trip trip = new Trip(tripId, routeId, shapeId);
                 tripLookupMap.put(tripId, trip);
@@ -286,6 +304,8 @@ public class GtfsScheduleService {
                 routeLookupMap.size(),
                 tripLookupMap.size(),
                 shapeLookupMap.size(),
+                orphanTripsCount,
+                outOfBoundsStopsCount,
                 new ArrayList<>(foundFiles),
                 new ArrayList<>(missingFiles),
                 new ArrayList<>(warnings)
