@@ -14,16 +14,15 @@ I built it to learn how transit data actually works. Almost every transit agency
 - Downloads the STM's GTFS schedule retrieved from the web (a zip of CSV files) and reads it in the background.
 - Gives a report on what it found: how many stops, routes, trips and shapes there are, which files were found or missing, and a few simple checks on the data (like [trips that point to a route that doesn't exist] and [stops with coordinates outside the Montréal area]).
 - Pulls live bus positions from the STM's real-time feed (GTFS-RT).
-- Shows everything on a Mapbox map.
-- Shows a list of all of the stops contained within a radius of 500 meters when clicking on an area on the map.
+- Lets you click anywhere on the map to see the stops within 500 metres. I used an R-tree for this so the search stays fast with thousands of stops.
+- Shows everything on a Leaflet map: route lines, live buses, and stops.
 
 ## How it works
 
 - **Java 17 + Spring Boot** for the backend.
-- Loading the schedule takes a while, so the ingest endpoint starts the work in the background and answers right away with a link to `/api/status`. You check that link to see if it's done or failed.
-- The live positions come from the STM's real-time API, using my own API key.
-- The map gets its data from a GeoJSON endpoint: https://stm-gtfs-service-568483343462.northamerica-northeast1.run.app/api/map/routes.
-- The map gets its realtime data from a GeoJSON endpoint: https://stm-gtfs-service-568483343462.northamerica-northeast1.run.app/api/map/vehicles.
+- Loading the schedule takes a while. When the page opens, it asks the server to load it (/api/load), then checks /api/status every second until it says READY or FAILED. If the data was already loaded in the last 12 hours, the server skips the download, so visitors don't trigger it over and over.
+- The live positions come from the STM's real-time API, using my own API key. The server keeps the last result for a few seconds, so many visitors share one call to the STM instead of each making their own.
+- The map gets its data from two GeoJSON endpoints: /api/map/routes for the route lines and /api/map/vehicles for the live buses.
 
 ## Why I made some of the choices I did
 
@@ -81,8 +80,10 @@ gcloud run deploy stm-gtfs-service \
 
 - [ ] Make the agency configurable so it also works with STL (Laval), since GTFS is a standard format.
 
-## Data
+## Data and attribution
 
 The schedule and real-time data come from the Société de transport de Montréal (STM) open data, used under the Creative Commons Attribution 4.0 license (CC BY 4.0). Source: Société de transport de Montréal.
+
+The app only reads stops, routes, trips and shapes. It never reads schedule times, so metro lines and stations are only drawn on the map for reference. The app doesn't use any metro timetables.
 
 This is a personal learning project. It isn't affiliated with or endorsed by the STM, and the data is provided as is, so it may be wrong or out of date.
