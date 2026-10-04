@@ -41,6 +41,8 @@ public class GtfsScheduleService {
     private static final double MAX_LON = -73.0;
     private RTree<Stop, Point> spatialIndex = RTree.create();
 
+    private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(GtfsScheduleService.class);
+
     public enum LoadStatus { IDLE, LOADING, READY, FAILED }
 
     private LoadStatus status = LoadStatus.IDLE;
@@ -99,7 +101,8 @@ public class GtfsScheduleService {
             }
         } catch (Exception e) {
             this.status = LoadStatus.FAILED;
-        warnings.add("Error while parsing through zip file.");
+            warnings.add("Error while parsing through zip file. " + e.toString());
+            log.error("GTFS ingestion failed: {}", e.toString(), e);
         }
         buildRtree();
         saveReport();
