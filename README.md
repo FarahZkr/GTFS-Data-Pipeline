@@ -1,7 +1,7 @@
 # STM - GTFS Data Pipeline
 Takes raw GTFS-Realtime feeds and enriches them with static schedule details.
 
-**Live demo:** [[PASTE YOUR CLOUD RUN URL HERE]](https://stm-gtfs-service-568483343462.northamerica-northeast1.run.app/)
+**Live demo:** https://stm-gtfs-service-568483343462.northamerica-northeast1.run.app/
 
 This is a small Java app that downloads Montréal's bus schedule from the STM, checks it for problems, and shows live bus positions on a map. It runs on Google Cloud Run.
 
@@ -22,8 +22,8 @@ I built it to learn how transit data actually works. Almost every transit agency
 - **Java 17 + Spring Boot** for the backend.
 - Loading the schedule takes a while, so the ingest endpoint starts the work in the background and answers right away with a link to `/api/status`. You check that link to see if it's done or failed.
 - The live positions come from the STM's real-time API, using my own API key.
-- The map gets its data from a GeoJSON endpoint: [[PUT YOUR ENDPOINT PATH HERE]](https://stm-gtfs-service-568483343462.northamerica-northeast1.run.app/api/map/routes).
-- The map gets its realtime data from a GeoJSON endpoint: [[PUT YOUR ENDPOINT PATH HERE]](https://stm-gtfs-service-568483343462.northamerica-northeast1.run.app/api/map/vehicles).
+- The map gets its data from a GeoJSON endpoint: https://stm-gtfs-service-568483343462.northamerica-northeast1.run.app/api/map/routes.
+- The map gets its realtime data from a GeoJSON endpoint: https://stm-gtfs-service-568483343462.northamerica-northeast1.run.app/api/map/vehicles.
 
 ## Why I made some of the choices I did
 
