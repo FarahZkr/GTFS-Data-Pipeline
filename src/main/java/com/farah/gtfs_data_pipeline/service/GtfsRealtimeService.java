@@ -13,6 +13,8 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
+import java.time.Duration;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -35,13 +37,21 @@ public class GtfsRealtimeService {
     @Value("${gtfs.realtime.url}")
     private String realtimeUrl;
 
+    private record CachedFeed(Instant fetchedAt, List<VehiclePosition> vehicles) {}
+    private volatile CachedFeed cached;
+    private static final Duration TTL = Duration.ofSeconds(10);
+    private static final Duration MAX_STALE = Duration.ofMinutes(2);
+
     public GeoJsonFeatureCollection getLiveVehiclesAsGeoJson() throws IOException {
-        List<GeoJsonFeature> features = new ArrayList<>();
-        Map<String, Trip> trips = scheduleService.getTrips();
-        Map<String, Route> routes = scheduleService.getRoutes();
         List<GtfsRealtime.VehiclePosition> positions = getLiveVehicles();
 
-        positions.forEach((v -> {
+        Map<String, Trip> trips = scheduleService.getTrips();
+        Map<String, Route> routes = scheduleService.getRoutes();
+
+        List<GeoJsonFeature> features = new ArrayList<>(positions.size());
+
+        for (GtfsRealtime.VehiclePosition v : positions) {
+            if(!v.hasPosition()) continue;
             // Coordinates directly from GPS unit
             double latitude = v.getPosition().getLatitude();
             double longitude = v.getPosition().getLongitude();
@@ -53,43 +63,69 @@ public class GtfsRealtimeService {
             float speed = v.getPosition().hasSpeed() ? v.getPosition().getSpeed() : 0.0f;
             // VehicleId
             String vehicleId = v.hasVehicle() && v.getVehicle().hasId() ? v.getVehicle().getId() : "UNKNOWN";
-
             String tripId = v.hasTrip() ? v.getTrip().getTripId() : "";
+
             String routeName = "Unknown Route";
             String routeColor = "#000000";
 
-            Trip trip = trips.get(tripId);
-            if(trip != null){
-                Route route = routes.get(trip.routeId());
-                if(route != null){
-                    routeName = route.routeShortName();
-                    routeColor = route.routeColor();
+            if (!tripId.isEmpty()) {
+                Trip trip = trips.get(tripId);
+                if (trip != null) {
+                    Route route = routes.get(trip.routeId());
+                    if (route != null) {
+                        routeName = route.routeShortName();
+                        routeColor = route.routeColor();
+                    }
                 }
             }
 
-            Map<String, Object> props = new HashMap<>();
-            props.put("vehicle_id", vehicleId);
-            props.put("trip_id", tripId);
-            props.put("route_short_name", routeName);
-            props.put("route_color", routeColor);
-            props.put("bearing", bearing);
-            props.put("speed", speed);
+            Map<String, Object> props = Map.of(
+                    "vehicle_id", vehicleId,
+                    "trip_id", tripId,
+                    "route_short_name", routeName,
+                    "route_color", routeColor,
+                    "bearing", bearing,
+                    "speed", speed
+            );
 
             features.add(new GeoJsonFeature(
                     new GeoJsonGeometry(
                             "Point",
                             List.of(longitude, latitude)),
                     props));
-        }));
+        }
         return new GeoJsonFeatureCollection(features);
     }
 
+    // Handles caching
     public List<VehiclePosition> getLiveVehicles() throws IOException {
-        List<VehiclePosition> liveVehiclePositions = new ArrayList<>();
+        CachedFeed c = cached;
+        if (c != null && age(c).compareTo(TTL) < 0) return c.vehicles();
 
+        synchronized (this) {
+            c = cached;
+            if (c != null && age(c).compareTo(TTL) < 0) return c.vehicles();
+            try {
+                List<VehiclePosition> fresh = fetchLiveVehicles();
+                cached = new CachedFeed(Instant.now(), fresh);
+                return fresh;
+            } catch (IOException | RuntimeException e) {
+                if (c != null && age(c).compareTo(MAX_STALE) < 0) return c.vehicles();
+                throw e;
+            }
+        }
+    }
+
+    private Duration age(CachedFeed c) {
+        return Duration.between(c.fetchedAt(), Instant.now());
+    }
+
+    private List<VehiclePosition> fetchLiveVehicles() throws IOException {
         URL url = new URL(realtimeUrl);
         HttpURLConnection conn = (HttpURLConnection) url.openConnection();
         conn.setRequestMethod("GET");
+        conn.setConnectTimeout(5000);
+        conn.setReadTimeout(5000);
 
         conn.setRequestProperty("apiKey", apiKey.trim());
         conn.setRequestProperty("accept", "application/x-protobuf");

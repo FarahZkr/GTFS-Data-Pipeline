@@ -23,6 +23,8 @@ import java.io.InputStreamReader;
 import java.io.Reader;
 import java.net.URI;
 import java.net.URL;
+import java.time.Duration;
+import java.time.Instant;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.zip.ZipEntry;
@@ -45,7 +47,7 @@ public class GtfsScheduleService {
 
     public enum LoadStatus { IDLE, LOADING, READY, FAILED }
 
-    private LoadStatus status = LoadStatus.IDLE;
+    private volatile LoadStatus status = LoadStatus.IDLE;
     private GtfsLoadReport lastReport;
 
     private final Map<String, Stop> stopLookupMap = new ConcurrentHashMap<>();
@@ -58,8 +60,40 @@ public class GtfsScheduleService {
     private int outOfBoundsStopsCount = 0;
     private int orphanTripsCount = 0;
 
+    // Caching system
+    private volatile Instant lastSuccess;
+    private volatile Instant lastAttempt;
+    private static final Duration MAX_AGE = Duration.ofHours(12);
+    private static final Duration RETRY_COOLDOWN = Duration.ofMinutes(2);
+
+    private String getEffectiveUrl() {
+        return (scheduleUrl != null && !scheduleUrl.isBlank())
+                ? scheduleUrl
+                : "https://www.stm.info/sites/default/files/gtfs/gtfs_stm.zip";
+    }
+
     public void loadStopsFromConfiguredUrl() throws Exception {
-        loadGtfsData(this.scheduleUrl);
+        Instant now = Instant.now();
+
+        if (this.status == LoadStatus.LOADING) {
+            log.info("GTFS ingestion is currently in progress. Skipping duplicate load request.");
+            return;
+        }
+
+        boolean fresh = status == LoadStatus.READY && lastSuccess != null
+                && Duration.between(lastSuccess, now).compareTo(MAX_AGE) < 0;
+        boolean failedRecently = status == LoadStatus.FAILED && lastAttempt != null
+                && Duration.between(lastAttempt, now).compareTo(RETRY_COOLDOWN) < 0;
+
+        if (fresh || failedRecently) {
+            String msg = "Skipping GTFS download (Fresh cache or in retry cooldown).";
+            log.info(msg);
+            warnings.add(msg);
+            return;
+        }
+
+        lastAttempt = now;
+        loadGtfsData(getEffectiveUrl());
     }
 
     @Async
@@ -76,6 +110,8 @@ public class GtfsScheduleService {
         foundFiles.clear();
         missingFiles.clear();
         warnings.clear();
+        outOfBoundsStopsCount = 0;
+        orphanTripsCount = 0;
 
         try (ZipInputStream zipIn = new ZipInputStream(url.openStream())) {
             ZipEntry entry;
@@ -91,7 +127,6 @@ public class GtfsScheduleService {
                 }
                 zipIn.closeEntry();
             }
-            this.status = LoadStatus.READY;
             // Retrieving information on all missing files
             List<String> requiredFiles = List.of("agency.txt", "stops.txt", "routes.txt", "trips.txt", "shapes.txt");
             for (String file : requiredFiles) {
@@ -105,6 +140,10 @@ public class GtfsScheduleService {
             log.error("GTFS ingestion failed: {}", e.toString(), e);
         }
         buildRtree();
+        if (this.status == LoadStatus.LOADING) {
+            this.status = LoadStatus.READY;
+            this.lastSuccess = Instant.now();
+        }
         saveReport();
     }
 
